@@ -49,19 +49,24 @@ int main(void)
 
 	mpu6050_init(&accel, delay_func);
 	printf("i2c result: %u\n", i2c_err);
-	
+
 	while(1) {
 		if (!mpu6050_get_result(&accel)) {
-			float sum = acc_data.x * acc_data.x;
+			double lxy, lyz, lzx;
+			double sum = acc_data.x * acc_data.x;
 			sum += acc_data.y * acc_data.y;
 			sum += acc_data.z * acc_data.z;
 			sum = sqrt(sum);
+			lxy = atan2(acc_data.y, acc_data.x) * 180 / 3.1415;
+			lyz = atan2(acc_data.z, acc_data.y) * 180 / 3.1415;
+			lzx = atan2(acc_data.x, acc_data.z) * 180 / 3.1415;
 
-			printf("x = %.3f, y = %.3f, z = %.3f s = %.3f, t = %.2f\n",
-				acc_data.x, acc_data.y, acc_data.z, sum, acc_data.temp);
+			/*printf("x = %.3f, y = %.3f, z = %.3f s = %.3f, t = %.2f\n",
+				acc_data.x, acc_data.y, acc_data.z, sum, acc_data.temp);*/
+			printf("lxy: %.0f, lyz: %.0f, lzx: %.0f\n", lxy, lyz, lzx);
 		}
 	}
-	
+
 	i2c_close(&i2c);
 	return 0;
 }
