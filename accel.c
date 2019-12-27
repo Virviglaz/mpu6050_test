@@ -3,6 +3,9 @@
 #include "i2c.h"
 #include "MPU6050.h"
 #include "apds9960.h"
+#include "BME280.h"
+#include "PCA9685.h"
+#include "ads111x.h"
 #include <math.h>
 
 static struct i2c_dev i2c;
@@ -32,9 +35,27 @@ static uint8_t i2c_rd_adps9930(uint8_t Reg, uint8_t * buf, uint16_t size)
 	return 0;
 }
 
+static uint8_t bme280_write(uint8_t reg, uint8_t value)
+{
+	i2c_err |= i2c.wr_reg(NULL, BME280_DEFAULT_I2C_ADDRESS, reg, &value, 1);
+	return 0;
+}
+
+static uint8_t bme280_read(uint8_t reg, uint8_t *buf, uint16_t size)
+{
+	i2c_err |= i2c.rd_reg(NULL, BME280_DEFAULT_I2C_ADDRESS, reg, buf, size);
+	return 0;
+}
+
 static void delay_func(void)
 {
 	sleep(1);
+}
+
+static uint8_t wr(uint8_t i2c_addr, uint8_t reg, uint8_t *buf, uint8_t size)
+{
+	i2c_err |= i2c.wr_reg(NULL, i2c_addr, reg, buf, size);
+	return 0;
 }
 
 static struct mpu_real_values acc_data;
@@ -57,33 +78,101 @@ static struct apds9960 apds = {
 	.read_reg = i2c_rd_adps9930,
 	.check_irq = NULL,
 	.wait_for_irq = NULL,
-	.ctrl1 = { .again = AGAIN_8x, .pgain = PGAIN_1x, .led_c = LED_12mA },
-	.conf2 = { .led_boost = BOOST_100 },
 };
+
+static struct bme280_t bme280 = {
+	.write_reg = bme280_write,
+	.read_reg = bme280_read,
+	.humidity_oversampling = BME280_OVS_X4,
+	.pressure_oversampling = BME280_OVS_X4,
+	.temperature_oversampling = BME280_OVS_X4,
+};
+
+static struct pca9685_t pwm = {
+	.wr = wr,
+	.i2c_addr = 0x40,
+	.ext_clk = PCA9685_EXT_CLK_DISABLED,
+	.psc = PCA9685_50HZ_PSC_VALUE,
+};
+
+static void set_pwm(uint16_t value)
+{
+	int i;
+	for (i = 0; i < 15; i++)
+		pca9685_set(&pwm, i, value);
+}
 
 int main(void)
 {
-	uint8_t ret;
+	uint8_t ret, i = 10;
+
 	if (ret = i2c_init(&i2c, "/dev/i2c-1")) {
 		printf("Error %d\n", ret);
 		return ret;
 	}
+
+	if (!pca9685_init(&pwm)) {
+		for (i = 0; i != 10; i++) {
+			printf("PWM works %u\n", i2c_err);
+			set_pwm(i * 100);
+			sleep(1);
+		}
+	}
+
+	/*if (!bme280_init(&bme280)) {
+		while (bme280_calibrate_sea_level(&bme280));
+		while (bme280_get_result(&bme280));
+		printf("Temperature: %f\n", bme280.temperature);
+		printf("Humidity: %f\n", bme280.humidity);
+		printf("Pressure: %u\n", bme280.pressure);
+		printf("Altitude: %f\n", bme280_altitude(&bme280));
+		printf("mmHg: %u\n", bme280_mmHg(&bme280));
+	}*/
+
 	printf("Struct size: %u\n", sizeof(apds));
 
-	if (!apds9960_init(&apds)) {
+	if (!apds9960_init(&apds, false, true)) {
 		printf("ADPS9960 init done!\n");
 		apds9960_meas_crgb(&apds, &crgb);
-		printf("RED:	%u\n", crgb.r);
-		printf("GREEN:	%u\n", crgb.g);
-		printf("BLUE:	%u\n", crgb.b);
-		printf("CLEAR:	%u\n", crgb.c);
+		printf("RED:	%u\n", crgb.red);
+		printf("GREEN:	%u\n", crgb.green);
+		printf("BLUE:	%u\n", crgb.blue);
+		printf("CLEAR:	%u\n", crgb.clear);
+	}
+		
+	while (--i) {
+		if (ret = apds9960_proximity(&apds))
+			printf("Proxy pass: %u\n", ret);
 	}
 	
-	while (++ret < 10) {
-		if (apds9960_proximity(&apds, 0xFFF0))
-			printf("Proxy pass!\n");
+	i = 100;
+	while (--i) {
+		enum apds_gesture gesture = apds9960_gesture(&apds);
+		switch (gesture) {
+		case NO_ACTIVITY:
+			printf("No activity\n");
+			break;
+		case DIR_UP:
+			printf("Direction up\n");
+			break;
+		case DIR_DOWN:
+			printf("Direction down\n");
+			break;
+		case DIR_LEFT:
+			printf("Direction left\n");
+			break;
+		case DIR_RIGHT:
+			printf("Direction right\n");
+			break;
+		case ERR_DATA_INVALID:
+			printf("Data invalid\n");
+			break;
+		default:
+			printf("Undefined value\n");
+		}		
 	}
 	
+	i2c_close(&i2c);
 	return 0;
 	mpu6050_init(&accel, delay_func);
 	printf("i2c result: %u\n", i2c_err);
