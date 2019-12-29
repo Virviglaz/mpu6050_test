@@ -1,8 +1,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include "i2c.h"
-#include "ads111x.h"
-#include <math.h>
+#include "ina3221.h"
 
 static struct i2c_dev i2c;
 static uint8_t i2c_err = 0;
@@ -24,22 +23,29 @@ static uint8_t i2c_rd(uint8_t i2c_addr, uint8_t reg, uint8_t *buf, uint16_t size
 	return i2c_err;
 }
 
-struct ads111x_t adc = {
-	.i2c_addr = ADS111X_I2C_ADDR_GND,
+struct ina3221_t ina = {
+	.i2c_addr = INA3221_I2C_ADDRESS_GND,
 	.wr = i2c_wr,
 	.rd = i2c_rd,
-	.gain = FSR_1_024V,
-	.mode = SINGLE_SHOT,
-	.rate = RATE_8_HZ,
-	.comp = TRADITIONAL,
-	.cpol = COMP_ACTIVE_HIGH,
-	.comp_latch = COMP_LATCH_DISABLE,
-	.comp_mode = COMP_DISABLED,
+	.config = {
+		.mode = SHUNT_AND_BUS_CONTIUOUS,
+		.shunt_voltage_conv_time = CONV_TIME_1100US,
+		.bus_voltage_conv_time = CONV_TIME_1100US,
+		.average = AVG_1024,
+		.reset = false,
+		.ch1_enable = true,
+		.ch2_enable = true,
+		.ch3_enable = true,
+	},
+	.shunt[0] = 0.1,
+	.shunt[1] = 0.1,
+	.shunt[2] = 0.1,
 };
 
 int main(void)
 {
-	uint8_t ret, i;
+	uint8_t ret, i = 10;
+	double voltage, current;
 
 	ret = i2c_init(&i2c, "/dev/i2c-1");
 	if (ret) {
@@ -47,13 +53,16 @@ int main(void)
 		return ret;
 	}
 
-	if (!ads111x_init(&adc)) {
-		int16_t res;
-		printf("ADC works: %u\n", i2c_err);
-		for (i = 0; i < 10; i++) {
-			ads111x_start(&adc, IN0_GND);
-			while (ads111x_read(&adc, &res));
-			printf("ADC result: %d\n", res);
+	if (!ina3221_init(&ina)) {
+		printf("ina3221 works!\n");
+		ina3221_set_warning_current(&ina, 1.0, CH1);
+		ina3221_set_critical_current(&ina, 2.0, CH1);
+		while (i--) {
+			voltage = ina3221_read_bus_voltage(&ina, CH1);
+			current = ina3221_read_shunt_current(&ina, CH1);
+			//while (!ina3221_read_bus_voltage(&ina, 0, &voltage));
+			//while (!ina3221_read_shunt_current(&ina, 0, &current));
+			printf("RES: %.3f V\t\t%.3f A\n", voltage, current);
 		}
 	}
 
